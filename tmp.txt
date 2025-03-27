@@ -1,48 +1,87 @@
-import com.alibaba.excel.EasyExcel;
-import com.alibaba.excel.eventrieader.builder.ExcelBuilder;
-import com.alibaba.excel.eventrieader.listener.PageReadListener;
-import com.alibaba.excel.read.listener.ReadListener;
-import com.alibaba.excel.read.metadata.ReadSheet;
-import com.alibaba.excel.read.metadata.CellData;
-import org.springframework.web.multipart.MultipartFile;
-import java.io.IOException;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.xssf.model.SharedStringsTable;
+import org.xml.sax.*;
+import javax.xml.parsers.SAXParserFactory;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
-public class ExcelReader {
+public class ExcelSAXReader {
 
     public List<String> getFirstRow(MultipartFile file) {
-        FirstRowListener listener = new FirstRowListener();
         try (InputStream is = file.getInputStream()) {
-            EasyExcel.read(is, listener).sheet().doRead();
-        } catch (IOException e) {
-            throw new RuntimeException("读取Excel文件失败", e);
+            OPCPackage opcPackage = OPCPackage.open(is);
+            XSSFReader xssfReader = new XSSFReader(opcPackage);
+            SharedStringsTable sst = xssfReader.getSharedStringsTable();
+
+            // 只处理第一个Sheet
+            XSSFReader.SheetIterator sheets = (XSSFReader.SheetIterator) xssfReader.getSheetsData();
+            if (!sheets.hasNext()) {
+                return new ArrayList<>();
+            }
+
+            // 解析第一个Sheet
+            InputStream sheetInputStream = sheets.next();
+            ContentHandler handler = new FirstRowHandler(sst);
+            InputSource sheetSource = new InputSource(sheetInputStream);
+            SAXParserFactory saxFactory = SAXParserFactory.newInstance();
+            SAXParser saxParser = saxFactory.newSAXParser();
+            saxParser.parse(sheetSource, handler);
+
+            return ((FirstRowHandler) handler).getFirstRow();
+        } catch (Exception e) {
+            throw new RuntimeException("读取Excel失败", e);
         }
-        return listener.getFirstRow();
     }
 
-    private static class FirstRowListener extends AnalysisEventListener<List<CellData>> {
+    private static class FirstRowHandler extends DefaultHandler {
+        private SharedStringsTable sst;
         private List<String> firstRow;
-        private boolean isDone = false;
+        private boolean isReadingFirstRow = false;
+        private StringBuilder cellValue;
+
+        public FirstRowHandler(SharedStringsTable sst) {
+            this.sst = sst;
+            this.firstRow = new ArrayList<>();
+        }
 
         @Override
-        public void invoke(List<CellData> data, AnalysisContext context) {
-            if (!isDone) {
-                firstRow = new ArrayList<>();
-                for (CellData cell : data) {
-                    firstRow.add(cell.getStringValue());
-                }
-                isDone = true;
-                context.abortRead(); // 停止后续解析
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            if ("row".equals(qName)) {
+                isReadingFirstRow = true; // 假设第一行是第一个row标签
+            }
+            if ("c".equals(qName)) { // 单元格标签
+                cellValue = new StringBuilder();
             }
         }
 
         @Override
-        public void doAfterAllAnalysed(AnalysisContext context) {}
+        public void endElement(String uri, String localName, String qName) {
+            if ("row".equals(qName)) {
+                isReadingFirstRow = false;
+                // 读取到第一行后停止解析（需手动终止）
+                try {
+                    Thread.currentThread().interrupt(); // 强制中断（需谨慎）
+                } catch (Exception e) {}
+            }
+            if ("c".equals(qName)) { // 处理单元格值
+                String value = evaluateCellValue(cellValue.toString());
+                firstRow.add(value);
+                cellValue = null;
+            }
+        }
+
+        private String evaluateCellValue(String cellData) {
+            // 根据单元格类型解析值（简化处理）
+            return cellData;
+        }
 
         public List<String> getFirstRow() {
-            return firstRow == null ? new ArrayList<>() : firstRow;
+            return firstRow;
         }
     }
 }
