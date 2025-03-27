@@ -1,7 +1,4 @@
-import com.alibaba.excel.EasyExcel;
-import com.alibaba.excel.read.listener.ReadListener;
-import com.alibaba.excel.read.metadata.ReadSheet;
-import com.alibaba.excel.read.metadata.CellData;
+import org.apache.poi.ss.usermodel.*;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
@@ -12,36 +9,28 @@ import java.util.List;
 public class ExcelReader {
 
     public List<String> getFirstRow(MultipartFile file) {
-        FirstRowListener listener = new FirstRowListener();
         try (InputStream is = file.getInputStream()) {
-            EasyExcel.read(is, List.class, listener).sheet().doRead();
+            // 创建Workbook对象（自动处理.xls和.xlsx格式）
+            Workbook workbook = WorkbookFactory.create(is);
+            // 获取第一个Sheet
+            Sheet sheet = workbook.getSheetAt(0);
+            if (sheet == null) {
+                return Collections.emptyList();
+            }
+            // 获取第一行
+            Row row = sheet.getRow(0);
+            if (row == null) {
+                return Collections.emptyList();
+            }
+            // 遍历第一行的单元格，将数据转换为字符串列表
+            List<String> firstRow = new ArrayList<>();
+            DataFormatter formatter = new DataFormatter();
+            for (Cell cell : row) {
+                firstRow.add(formatter.formatCellValue(cell));
+            }
+            return firstRow;
         } catch (IOException e) {
             throw new RuntimeException("读取Excel文件失败", e);
-        }
-        return listener.getFirstRow();
-    }
-
-    private static class FirstRowListener implements ReadListener<List<CellData>> {
-        private List<String> firstRow;
-        private boolean isDone = false;
-
-        @Override
-        public void invoke(List<CellData> data, AnalysisContext context) {
-            if (!isDone) {
-                firstRow = new ArrayList<>();
-                for (CellData cell : data) {
-                    firstRow.add(cell.getStringValue());
-                }
-                isDone = true; // 标记已读取第一行
-            }
-            // 后续行直接跳过处理
-        }
-
-        @Override
-        public void doAfterAllAnalysed(AnalysisContext context) {}
-
-        public List<String> getFirstRow() {
-            return firstRow == null ? Collections.emptyList() : firstRow;
         }
     }
 }
