@@ -23,26 +23,23 @@ public class ExcelSaxReader {
             SharedStringsTable sst = reader.getSharedStringsTable();
             InputStream sheetInputStream = reader.getSheetsData().next();
 
-            // **使用 SAX 解析第一行**
             List<String> firstRowData = new ArrayList<>();
             XMLReader parser = XMLReaderFactory.createXMLReader();
             FirstRowParser handler = new FirstRowParser(sst, firstRowData);
             parser.setContentHandler(handler);
-            
+
             try {
                 parser.parse(new InputSource(sheetInputStream));
             } catch (StopParsingException e) {
-                // **捕获异常并终止 SAX 解析**
+                // 终止解析
             }
 
             return firstRowData.isEmpty() ? new ArrayList<>() : firstRowData;
         }
     }
 
-    // **自定义异常：用于终止 SAX 解析**
     private static class StopParsingException extends SAXException {}
 
-    // **SAX 解析器：检查第一行是否为空，并解析第一行数据**
     private static class FirstRowParser extends DefaultHandler {
         private final SharedStringsTable sst;
         private final List<String> firstRowData;
@@ -51,7 +48,7 @@ public class ExcelSaxReader {
         private StringBuilder cellValue = new StringBuilder();
         private int lastColumnIndex = -1;
         private int currentColumnIndex = 0;
-        private boolean isRowEmpty = true; // **用于判断当前行是否为空**
+        private boolean isRowEmpty = true; 
 
         public FirstRowParser(SharedStringsTable sst, List<String> firstRowData) {
             this.sst = sst;
@@ -61,19 +58,18 @@ public class ExcelSaxReader {
         @Override
         public void startElement(String uri, String localName, String qName, Attributes attributes) throws SAXException {
             if (firstRowParsed) {
-                throw new StopParsingException(); // **终止解析**
+                throw new StopParsingException();
             }
 
             if ("row".equals(qName)) {
                 lastColumnIndex = -1;
-                isRowEmpty = true; // **假设当前行为空**
+                isRowEmpty = true; 
             }
             if ("c".equals(qName)) {
                 String cellRef = attributes.getValue("r");
                 currentColumnIndex = getColumnIndex(cellRef);
                 isString = "s".equals(attributes.getValue("t"));
                 cellValue.setLength(0);
-                isRowEmpty = false; // **一旦发现 `<c>` 标签，说明当前行有数据**
             }
         }
 
@@ -88,6 +84,9 @@ public class ExcelSaxReader {
 
             if ("v".equals(qName)) {
                 String value = cellValue.toString().trim();
+                if (!value.isEmpty()) {
+                    isRowEmpty = false;
+                }
                 if (isString) {
                     int idx = Integer.parseInt(value);
                     value = new XSSFRichTextString(sst.getEntryAt(idx)).toString();
@@ -100,20 +99,18 @@ public class ExcelSaxReader {
             if ("row".equals(qName)) {
                 firstRowParsed = true;
                 if (isRowEmpty) { 
-                    firstRowData.clear(); // **如果第一行为空，清空数据**
+                    firstRowData.clear(); 
                 }
-                throw new StopParsingException(); // **终止解析，防止 SAX 继续解析**
+                throw new StopParsingException();
             }
         }
 
-        // **填充空单元格**
         private void fillEmptyColumns(int lastIndex, int currentIndex) {
             for (int i = lastIndex + 1; i < currentIndex; i++) {
                 firstRowData.add("");
             }
         }
 
-        // **获取列索引（A=0, B=1, ..., AA=26, AB=27）**
         private int getColumnIndex(String cellRef) {
             if (cellRef == null) return 0;
             int index = 0;
