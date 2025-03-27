@@ -1,36 +1,48 @@
-import org.apache.poi.ss.usermodel.*;
+import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.eventrieader.builder.ExcelBuilder;
+import com.alibaba.excel.eventrieader.listener.PageReadListener;
+import com.alibaba.excel.read.listener.ReadListener;
+import com.alibaba.excel.read.metadata.ReadSheet;
+import com.alibaba.excel.read.metadata.CellData;
 import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 public class ExcelReader {
 
     public List<String> getFirstRow(MultipartFile file) {
+        FirstRowListener listener = new FirstRowListener();
         try (InputStream is = file.getInputStream()) {
-            // 创建Workbook对象（自动处理.xls和.xlsx格式）
-            Workbook workbook = WorkbookFactory.create(is);
-            // 获取第一个Sheet
-            Sheet sheet = workbook.getSheetAt(0);
-            if (sheet == null) {
-                return Collections.emptyList();
-            }
-            // 获取第一行
-            Row row = sheet.getRow(0);
-            if (row == null) {
-                return Collections.emptyList();
-            }
-            // 遍历第一行的单元格，将数据转换为字符串列表
-            List<String> firstRow = new ArrayList<>();
-            DataFormatter formatter = new DataFormatter();
-            for (Cell cell : row) {
-                firstRow.add(formatter.formatCellValue(cell));
-            }
-            return firstRow;
+            EasyExcel.read(is, listener).sheet().doRead();
         } catch (IOException e) {
             throw new RuntimeException("读取Excel文件失败", e);
+        }
+        return listener.getFirstRow();
+    }
+
+    private static class FirstRowListener extends AnalysisEventListener<List<CellData>> {
+        private List<String> firstRow;
+        private boolean isDone = false;
+
+        @Override
+        public void invoke(List<CellData> data, AnalysisContext context) {
+            if (!isDone) {
+                firstRow = new ArrayList<>();
+                for (CellData cell : data) {
+                    firstRow.add(cell.getStringValue());
+                }
+                isDone = true;
+                context.abortRead(); // 停止后续解析
+            }
+        }
+
+        @Override
+        public void doAfterAllAnalysed(AnalysisContext context) {}
+
+        public List<String> getFirstRow() {
+            return firstRow == null ? new ArrayList<>() : firstRow;
         }
     }
 }
