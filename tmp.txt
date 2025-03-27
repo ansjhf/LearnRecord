@@ -13,9 +13,9 @@ private static class SheetHandler extends DefaultHandler {
                 int idx = Integer.parseInt(attributes.getValue("r").replaceAll("[^0-9]", "")) - 1; // 获取列索引
                 String val = attributes.getValue("v");
                 if (val != null) {
-                    // 使用 getEntryAt 方法来获取共享字符串
-                    SharedStringTableEntry entry = sharedStringsTable.getEntryAt(Integer.parseInt(val));
-                    cellValue = entry != null ? entry.getString() : "";
+                    // 使用 XSSFRichTextString 来获取共享字符串
+                    XSSFRichTextString richTextString = new XSSFRichTextString(sharedStringsTable.getEntryAt(Integer.parseInt(val)).getText());
+                    cellValue = richTextString != null ? richTextString.toString() : "";
                 }
             } else {
                 String inputValue = attributes.getValue("v");
