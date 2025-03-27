@@ -1,128 +1,91 @@
+import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
 import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
-import org.apache.poi.xssf.model.SharedStringsTable;
+import org.apache.poi.xssf.model.StylesTable;
 import org.apache.poi.xssf.usermodel.XSSFRichTextString;
+import org.springframework.web.multipart.MultipartFile;
 import org.xml.sax.Attributes;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
 import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.DefaultHandler;
 import org.xml.sax.helpers.XMLReaderFactory;
-import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ExcelSaxReader {
+public class ExcelSaxParser {
 
-    public static List<String> readFirstRow(MultipartFile file) throws Exception {
-        try (InputStream inputStream = file.getInputStream()) {
-            OPCPackage pkg = OPCPackage.open(inputStream);
-            XSSFReader reader = new XSSFReader(pkg);
-            SharedStringsTable sst = reader.getSharedStringsTable();
-            InputStream sheetInputStream = reader.getSheetsData().next();
+    public List<String> readFirstRowFromExcel(MultipartFile file) throws Exception {
+        OPCPackage pkg = OPCPackage.open(file.getInputStream());
+        XSSFReader reader = new XSSFReader(pkg);
+        StylesTable styles = reader.getStylesTable();
+        ReadOnlySharedStringsTable strings = new ReadOnlySharedStringsTable(pkg, true);
 
-            List<String> firstRowData = new ArrayList<>();
-            XMLReader parser = XMLReaderFactory.createXMLReader();
-            FirstRowParser handler = new FirstRowParser(sst, firstRowData);
-            parser.setContentHandler(handler);
-
-            try {
-                parser.parse(new InputSource(sheetInputStream));
-            } catch (StopParsingException e) {
-                // 终止解析
-            }
-
-            return firstRowData.isEmpty() ? new ArrayList<>() : firstRowData;
-        }
+        // 只处理第一个sheet
+        InputStream sheetInputStream = reader.getSheetsData().next();
+        SheetHandler handler = new SheetHandler(styles, strings);
+        XMLReader parser = XMLReaderFactory.createXMLReader();
+        parser.setContentHandler(handler);
+        
+        InputSource sheetSource = new InputSource(sheetInputStream);
+        parser.parse(sheetSource);
+        sheetInputStream.close();
+        
+        return handler.getFirstRow();
     }
 
-    private static class StopParsingException extends SAXException {}
+    private static class SheetHandler extends DefaultHandler {
+        private final DataFormatter formatter = new DataFormatter();
+        private final StylesTable stylesTable;
+        private final ReadOnlySharedStringsTable sharedStringsTable;
+        private boolean isRowTag = false;
+        private boolean isFirstRow = true;
+        private List<String> firstRow = new ArrayList<>();
 
-    private static class FirstRowParser extends DefaultHandler {
-        private final SharedStringsTable sst;
-        private final List<String> firstRowData;
-        private boolean firstRowParsed = false;
-        private boolean isString;
-        private StringBuilder cellValue = new StringBuilder();
-        private int lastColumnIndex = -1;
-        private int currentColumnIndex = 0;
-        private boolean isRowEmpty = true; 
-
-        public FirstRowParser(SharedStringsTable sst, List<String> firstRowData) {
-            this.sst = sst;
-            this.firstRowData = firstRowData;
+        public SheetHandler(StylesTable styles, ReadOnlySharedStringsTable strings) {
+            this.stylesTable = styles;
+            this.sharedStringsTable = strings;
         }
 
         @Override
-        public void startElement(String uri, String localName, String qName, Attributes attributes) throws SAXException {
-            if (firstRowParsed) {
-                throw new StopParsingException();
+        public void startElement(String uri, String localName, String name, Attributes attributes) throws SAXException {
+            if (name.equals("row")) {
+                isRowTag = true;
             }
-
-            if ("row".equals(qName)) {
-                lastColumnIndex = -1;
-                isRowEmpty = true; 
-            }
-            if ("c".equals(qName)) {
-                String cellRef = attributes.getValue("r");
-                currentColumnIndex = getColumnIndex(cellRef);
-                isString = "s".equals(attributes.getValue("t"));
-                cellValue.setLength(0);
-            }
-        }
-
-        @Override
-        public void characters(char[] ch, int start, int length) {
-            cellValue.append(ch, start, length);
-        }
-
-        @Override
-        public void endElement(String uri, String localName, String qName) throws SAXException {
-            if (firstRowParsed) return;
-
-            if ("v".equals(qName)) {
-                String value = cellValue.toString().trim();
-                if (!value.isEmpty()) {
-                    isRowEmpty = false;
-                }
-                if (isString) {
-                    int idx = Integer.parseInt(value);
-                    value = new XSSFRichTextString(sst.getEntryAt(idx)).toString();
-                }
-                fillEmptyColumns(lastColumnIndex, currentColumnIndex);
-                firstRowData.add(value);
-                lastColumnIndex = currentColumnIndex;
-            }
-
-            if ("row".equals(qName)) {
-                firstRowParsed = true;
-                if (isRowEmpty) { 
-                    firstRowData.clear(); 
-                }
-                throw new StopParsingException();
-            }
-        }
-
-        private void fillEmptyColumns(int lastIndex, int currentIndex) {
-            for (int i = lastIndex + 1; i < currentIndex; i++) {
-                firstRowData.add("");
-            }
-        }
-
-        private int getColumnIndex(String cellRef) {
-            if (cellRef == null) return 0;
-            int index = 0;
-            for (int i = 0; i < cellRef.length(); i++) {
-                char c = cellRef.charAt(i);
-                if (Character.isLetter(c)) {
-                    index = index * 26 + (c - 'A' + 1);
+            if (isRowTag && isFirstRow && name.equals("c")) { // c for cell
+                String cellType = attributes.getValue("t"); // t for type
+                String cellValue = "";
+                if ("s".equals(cellType)) { // s means string
+                    int idx = Integer.parseInt(attributes.getValue("r").replaceAll("[^0-9]", "")) - 1; // 获取列索引
+                    String val = attributes.getValue("v");
+                    if (val != null) {
+                        cellValue = new XSSFRichTextString(sharedStringsTable.getEntryAt(Integer.parseInt(val))).toString();
+                    }
                 } else {
-                    break;
+                    String inputValue = attributes.getValue("v");
+                    cellValue = inputValue != null ? formatter.formatRawCellContents(Double.parseDouble(inputValue), 0, null) : "";
+                }
+                firstRow.add(cellValue.isEmpty() ? "" : cellValue);
+            }
+        }
+
+        @Override
+        public void endElement(String uri, String localName, String name) throws SAXException {
+            if (name.equals("row") && isRowTag && isFirstRow) {
+                isRowTag = false;
+                isFirstRow = false;
+                if (firstRow.isEmpty()) { // 如果第一行为空，则返回空列表
+                    firstRow.clear();
                 }
             }
-            return index - 1;
+        }
+
+        public List<String> getFirstRow() {
+            return firstRow;
         }
     }
 }
