@@ -1,0 +1,128 @@
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.model.SharedStringsTable;
+import org.apache.poi.xssf.usermodel.XSSFRichTextString;
+import org.xml.sax.Attributes;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.DefaultHandler;
+import org.xml.sax.helpers.XMLReaderFactory;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
+
+public class ExcelSaxReader {
+
+    public static List<String> readFirstRow(MultipartFile file) throws Exception {
+        try (InputStream inputStream = file.getInputStream()) {
+            OPCPackage pkg = OPCPackage.open(inputStream);
+            XSSFReader reader = new XSSFReader(pkg);
+            SharedStringsTable sst = reader.getSharedStringsTable();
+            InputStream sheetInputStream = reader.getSheetsData().next();
+
+            // **使用 SAX 解析第一行**
+            List<String> firstRowData = new ArrayList<>();
+            XMLReader parser = XMLReaderFactory.createXMLReader();
+            FirstRowParser handler = new FirstRowParser(sst, firstRowData);
+            parser.setContentHandler(handler);
+            parser.parse(new InputSource(sheetInputStream));
+
+            // **如果第一行为空，返回 []**
+            return handler.isFirstRowEmpty() ? new ArrayList<>() : firstRowData;
+        }
+    }
+
+    // **SAX 解析器：检查第一行是否为空，并解析第一行数据**
+    private static class FirstRowParser extends DefaultHandler {
+        private final SharedStringsTable sst;
+        private final List<String> firstRowData;
+        private boolean firstRowParsed = false;
+        private boolean isString;
+        private StringBuilder cellValue = new StringBuilder();
+        private int lastColumnIndex = -1;
+        private int currentColumnIndex = 0;
+        private boolean isRowEmpty = true; // **用于判断当前行是否为空**
+
+        public FirstRowParser(SharedStringsTable sst, List<String> firstRowData) {
+            this.sst = sst;
+            this.firstRowData = firstRowData;
+        }
+
+        @Override
+        public void startElement(String uri, String localName, String qName, Attributes attributes) {
+            if ("row".equals(qName)) {
+                if (firstRowParsed) {
+                    return; // **已经解析了第一行，不再继续**
+                }
+                lastColumnIndex = -1;
+                isRowEmpty = true; // **假设当前行为空**
+            }
+            if ("c".equals(qName) && !firstRowParsed) {
+                String cellRef = attributes.getValue("r");
+                currentColumnIndex = getColumnIndex(cellRef);
+                isString = "s".equals(attributes.getValue("t"));
+                cellValue.setLength(0);
+                
+                isRowEmpty = false; // **一旦遇到 <c> 标签，就认为这一行不是空的**
+            }
+        }
+
+        @Override
+        public void characters(char[] ch, int start, int length) {
+            cellValue.append(ch, start, length);
+        }
+
+        @Override
+        public void endElement(String uri, String localName, String qName) {
+            if (firstRowParsed) return;
+
+            if ("v".equals(qName)) {
+                String value = cellValue.toString().trim();
+                if (isString) {
+                    int idx = Integer.parseInt(value);
+                    value = new XSSFRichTextString(sst.getEntryAt(idx)).toString();
+                }
+                fillEmptyColumns(lastColumnIndex, currentColumnIndex);
+                firstRowData.add(value);
+                lastColumnIndex = currentColumnIndex;
+            }
+
+            if ("row".equals(qName)) {
+                firstRowParsed = true;
+                if (isRowEmpty) { // **如果第一行为空，清空数据**
+                    firstRowData.clear();
+                }
+            }
+        }
+
+        // **检查第一行是否为空**
+        public boolean isFirstRowEmpty() {
+            return firstRowData.isEmpty();
+        }
+
+        // **填充空单元格**
+        private void fillEmptyColumns(int lastIndex, int currentIndex) {
+            for (int i = lastIndex + 1; i < currentIndex; i++) {
+                firstRowData.add("");
+            }
+        }
+
+        // **获取列索引（A=0, B=1, ..., AA=26, AB=27）**
+        private int getColumnIndex(String cellRef) {
+            if (cellRef == null) return 0;
+            int index = 0;
+            for (int i = 0; i < cellRef.length(); i++) {
+                char c = cellRef.charAt(i);
+                if (Character.isLetter(c)) {
+                    index = index * 26 + (c - 'A' + 1);
+                } else {
+                    break;
+                }
+            }
+            return index - 1;
+        }
+    }
+}
