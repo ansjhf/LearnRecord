@@ -1,91 +1,29 @@
-import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
-import org.apache.poi.openxml4j.opc.OPCPackage;
-import org.apache.poi.ss.usermodel.DataFormatter;
-import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
-import org.apache.poi.xssf.eventusermodel.XSSFReader;
-import org.apache.poi.xssf.model.StylesTable;
-import org.apache.poi.xssf.usermodel.XSSFRichTextString;
-import org.springframework.web.multipart.MultipartFile;
-import org.xml.sax.Attributes;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
-import org.xml.sax.XMLReader;
-import org.xml.sax.helpers.DefaultHandler;
-import org.xml.sax.helpers.XMLReaderFactory;
+private static class SheetHandler extends DefaultHandler {
+    // ... 其他变量和构造方法保持不变 ...
 
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-
-public class ExcelSaxParser {
-
-    public List<String> readFirstRowFromExcel(MultipartFile file) throws Exception {
-        OPCPackage pkg = OPCPackage.open(file.getInputStream());
-        XSSFReader reader = new XSSFReader(pkg);
-        StylesTable styles = reader.getStylesTable();
-        ReadOnlySharedStringsTable strings = new ReadOnlySharedStringsTable(pkg, true);
-
-        // 只处理第一个sheet
-        InputStream sheetInputStream = reader.getSheetsData().next();
-        SheetHandler handler = new SheetHandler(styles, strings);
-        XMLReader parser = XMLReaderFactory.createXMLReader();
-        parser.setContentHandler(handler);
-        
-        InputSource sheetSource = new InputSource(sheetInputStream);
-        parser.parse(sheetSource);
-        sheetInputStream.close();
-        
-        return handler.getFirstRow();
+    @Override
+    public void startElement(String uri, String localName, String name, Attributes attributes) throws SAXException {
+        if (name.equals("row")) {
+            isRowTag = true;
+        }
+        if (isRowTag && isFirstRow && name.equals("c")) { // c for cell
+            String cellType = attributes.getValue("t"); // t for type
+            String cellValue = "";
+            if ("s".equals(cellType)) { // s means string
+                int idx = Integer.parseInt(attributes.getValue("r").replaceAll("[^0-9]", "")) - 1; // 获取列索引
+                String val = attributes.getValue("v");
+                if (val != null) {
+                    // 使用 getSharedString 方法来获取字符串
+                    XSSFRichTextString richTextString = sharedStringsTable.getSharedString(new Integer(val));
+                    cellValue = richTextString != null ? richTextString.toString() : "";
+                }
+            } else {
+                String inputValue = attributes.getValue("v");
+                cellValue = inputValue != null ? formatter.formatRawCellContents(Double.parseDouble(inputValue), 0, null) : "";
+            }
+            firstRow.add(cellValue.isEmpty() ? "" : cellValue);
+        }
     }
 
-    private static class SheetHandler extends DefaultHandler {
-        private final DataFormatter formatter = new DataFormatter();
-        private final StylesTable stylesTable;
-        private final ReadOnlySharedStringsTable sharedStringsTable;
-        private boolean isRowTag = false;
-        private boolean isFirstRow = true;
-        private List<String> firstRow = new ArrayList<>();
-
-        public SheetHandler(StylesTable styles, ReadOnlySharedStringsTable strings) {
-            this.stylesTable = styles;
-            this.sharedStringsTable = strings;
-        }
-
-        @Override
-        public void startElement(String uri, String localName, String name, Attributes attributes) throws SAXException {
-            if (name.equals("row")) {
-                isRowTag = true;
-            }
-            if (isRowTag && isFirstRow && name.equals("c")) { // c for cell
-                String cellType = attributes.getValue("t"); // t for type
-                String cellValue = "";
-                if ("s".equals(cellType)) { // s means string
-                    int idx = Integer.parseInt(attributes.getValue("r").replaceAll("[^0-9]", "")) - 1; // 获取列索引
-                    String val = attributes.getValue("v");
-                    if (val != null) {
-                        cellValue = new XSSFRichTextString(sharedStringsTable.getEntryAt(Integer.parseInt(val))).toString();
-                    }
-                } else {
-                    String inputValue = attributes.getValue("v");
-                    cellValue = inputValue != null ? formatter.formatRawCellContents(Double.parseDouble(inputValue), 0, null) : "";
-                }
-                firstRow.add(cellValue.isEmpty() ? "" : cellValue);
-            }
-        }
-
-        @Override
-        public void endElement(String uri, String localName, String name) throws SAXException {
-            if (name.equals("row") && isRowTag && isFirstRow) {
-                isRowTag = false;
-                isFirstRow = false;
-                if (firstRow.isEmpty()) { // 如果第一行为空，则返回空列表
-                    firstRow.clear();
-                }
-            }
-        }
-
-        public List<String> getFirstRow() {
-            return firstRow;
-        }
-    }
+    // ... 其他方法保持不变 ...
 }
