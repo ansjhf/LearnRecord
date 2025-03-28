@@ -1,6 +1,6 @@
 public class ExcelRowChecker {
     public static boolean isFirstRow(String cell) {
-        if (cell == null || cell.matches("^[A-Z]+1$")) {
+        if (cell == null || "1".equals(cell) || cell.matches("^[A-Z]+1$")) {
             return true;
         }
         return false;
@@ -8,6 +8,7 @@ public class ExcelRowChecker {
 
     public static void main(String[] args) {
         System.out.println(isFirstRow(null));   // true
+        System.out.println(isFirstRow("1"));    // true
         System.out.println(isFirstRow("A1"));   // true
         System.out.println(isFirstRow("B1"));   // true
         System.out.println(isFirstRow("Z1"));   // true
