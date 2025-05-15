@@ -1,48 +1,54 @@
-import com.alibaba.excel.EasyExcel;
+import com.alibaba.excel.ExcelReader;
+import com.alibaba.excel.EasyExcelFactory;
+import com.alibaba.excel.read.metadata.ReadSheet;
+import com.alibaba.excel.read.metadata.ReadWorkbook;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.event.AnalysisEventListener;
 
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ExcelReader {
+public class ExcelReaderRaw {
 
-    public static List<List<String>> readExcelToList(String filePath) {
+    public static List<List<String>> readRawExcel(String filePath) {
         List<List<String>> dataList = new ArrayList<>();
 
-        EasyExcel.read(filePath, new AnalysisEventListener<Object>() {
-            @Override
-            public void invoke(Object data, AnalysisContext context) {
-                System.out.println("读取到一行数据：" + data);
-                if (data instanceof List) {
-                    List<?> row = (List<?>) data;
-                    List<String> stringRow = new ArrayList<>();
-                    for (Object cell : row) {
-                        stringRow.add(cell == null ? "" : cell.toString());
-                    }
-                    dataList.add(stringRow);
-                } else {
-                    System.out.println("数据不是 List 类型：" + data.getClass());
-                }
-            }
+        try (InputStream inputStream = new FileInputStream(filePath)) {
 
-            @Override
-            public void doAfterAllAnalysed(AnalysisContext context) {
-                System.out.println("所有数据读取完毕");
-            }
-        })
-        .headRowNumber(0) // 根据你有无表头来决定是否为0或1
-        .sheet() // 默认第一个 sheet
-        .doRead();
+            ExcelReader excelReader = EasyExcelFactory.read(inputStream, new AnalysisEventListener<List<Object>>() {
+                @Override
+                public void invoke(List<Object> data, AnalysisContext context) {
+                    List<String> row = new ArrayList<>();
+                    for (Object cell : data) {
+                        row.add(cell == null ? "" : cell.toString());
+                    }
+                    dataList.add(row);
+                }
+
+                @Override
+                public void doAfterAllAnalysed(AnalysisContext context) {
+                    // 完成
+                }
+            }).headRowNumber(0).build();
+
+            ReadSheet readSheet = EasyExcelFactory.readSheet(0).build();
+            excelReader.read(readSheet);
+            excelReader.finish();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
         return dataList;
     }
 
     public static void main(String[] args) {
-        String filePath = "test.xlsx"; // 建议用绝对路径试试
-        List<List<String>> rows = readExcelToList(filePath);
-        System.out.println("读取到行数：" + rows.size());
-        for (List<String> row : rows) {
+        String filePath = "test.xlsx";
+        List<List<String>> result = readRawExcel(filePath);
+        System.out.println("总行数：" + result.size());
+        for (List<String> row : result) {
             System.out.println(row);
         }
     }
