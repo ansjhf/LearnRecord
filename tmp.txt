@@ -1,54 +1,47 @@
-import com.alibaba.excel.ExcelReader;
-import com.alibaba.excel.EasyExcelFactory;
-import com.alibaba.excel.read.metadata.ReadSheet;
-import com.alibaba.excel.read.metadata.ReadWorkbook;
+import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.event.AnalysisEventListener;
 
-import java.io.FileInputStream;
-import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-public class ExcelReaderRaw {
+public class ExcelMapReader {
 
-    public static List<List<String>> readRawExcel(String filePath) {
+    public static List<List<String>> readExcelToList(String filePath) {
         List<List<String>> dataList = new ArrayList<>();
 
-        try (InputStream inputStream = new FileInputStream(filePath)) {
+        EasyExcel.read(filePath, new AnalysisEventListener<Map<Integer, String>>() {
+            @Override
+            public void invoke(Map<Integer, String> data, AnalysisContext context) {
+                // 你可以选择是否打印出来看看结构
+                // System.out.println("原始数据：" + data);
 
-            ExcelReader excelReader = EasyExcelFactory.read(inputStream, new AnalysisEventListener<List<Object>>() {
-                @Override
-                public void invoke(List<Object> data, AnalysisContext context) {
-                    List<String> row = new ArrayList<>();
-                    for (Object cell : data) {
-                        row.add(cell == null ? "" : cell.toString());
-                    }
-                    dataList.add(row);
+                List<String> row = new ArrayList<>();
+                for (int i = 0; i < data.size(); i++) {
+                    row.add(data.getOrDefault(i, ""));
                 }
+                dataList.add(row);
+            }
 
-                @Override
-                public void doAfterAllAnalysed(AnalysisContext context) {
-                    // 完成
-                }
-            }).headRowNumber(0).build();
-
-            ReadSheet readSheet = EasyExcelFactory.readSheet(0).build();
-            excelReader.read(readSheet);
-            excelReader.finish();
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+            @Override
+            public void doAfterAllAnalysed(AnalysisContext context) {
+                // 全部读取完成
+            }
+        })
+        .sheet()
+        .headRowNumber(0) // 如果你希望跳过表头，改为 1
+        .doRead();
 
         return dataList;
     }
 
     public static void main(String[] args) {
         String filePath = "test.xlsx";
-        List<List<String>> result = readRawExcel(filePath);
-        System.out.println("总行数：" + result.size());
-        for (List<String> row : result) {
+        List<List<String>> rows = readExcelToList(filePath);
+        System.out.println("总行数：" + rows.size());
+        for (List<String> row : rows) {
             System.out.println(row);
         }
     }
