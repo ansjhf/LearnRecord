@@ -13,7 +13,7 @@ public class ExcelReader {
         EasyExcel.read(filePath, new AnalysisEventListener<Object>() {
             @Override
             public void invoke(Object data, AnalysisContext context) {
-                // data 实际上是 List<Object>
+                System.out.println("读取到一行数据：" + data);
                 if (data instanceof List) {
                     List<?> row = (List<?>) data;
                     List<String> stringRow = new ArrayList<>();
@@ -21,24 +21,27 @@ public class ExcelReader {
                         stringRow.add(cell == null ? "" : cell.toString());
                     }
                     dataList.add(stringRow);
+                } else {
+                    System.out.println("数据不是 List 类型：" + data.getClass());
                 }
             }
 
             @Override
             public void doAfterAllAnalysed(AnalysisContext context) {
-                // 读取完成
+                System.out.println("所有数据读取完毕");
             }
-        }).headRowNumber(0) // 不使用表头
-          .excelType(com.alibaba.excel.support.ExcelTypeEnum.XLSX) // 可选：显式指定文件类型
-          .sheet()
-          .doRead();
+        })
+        .headRowNumber(0) // 根据你有无表头来决定是否为0或1
+        .sheet() // 默认第一个 sheet
+        .doRead();
 
         return dataList;
     }
 
     public static void main(String[] args) {
-        String filePath = "test.xlsx";
+        String filePath = "test.xlsx"; // 建议用绝对路径试试
         List<List<String>> rows = readExcelToList(filePath);
+        System.out.println("读取到行数：" + rows.size());
         for (List<String> row : rows) {
             System.out.println(row);
         }
