@@ -2,7 +2,6 @@ import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.event.AnalysisEventListener;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -11,15 +10,19 @@ public class ExcelReader {
     public static List<List<String>> readExcelToList(String filePath) {
         List<List<String>> dataList = new ArrayList<>();
 
-        EasyExcel.read(filePath, new AnalysisEventListener<List<String>>() {
+        EasyExcel.read(filePath, new AnalysisEventListener<List<Object>>() {
             @Override
-            public void invoke(List<String> data, AnalysisContext context) {
-                dataList.add(data);
+            public void invoke(List<Object> rowData, AnalysisContext context) {
+                List<String> row = new ArrayList<>();
+                for (Object cell : rowData) {
+                    row.add(cell == null ? "" : cell.toString());
+                }
+                dataList.add(row);
             }
 
             @Override
             public void doAfterAllAnalysed(AnalysisContext context) {
-                // 所有数据解析完成
+                // 读取完毕
             }
         }).sheet().doRead();
 
@@ -28,9 +31,8 @@ public class ExcelReader {
 
     public static void main(String[] args) {
         String filePath = "test.xlsx";
-        List<List<String>> result = readExcelToList(filePath);
-
-        for (List<String> row : result) {
+        List<List<String>> rows = readExcelToList(filePath);
+        for (List<String> row : rows) {
             System.out.println(row);
         }
     }
