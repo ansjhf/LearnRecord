@@ -2,47 +2,69 @@ import com.alibaba.excel.EasyExcel;
 import com.alibaba.excel.context.AnalysisContext;
 import com.alibaba.excel.event.AnalysisEventListener;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
-public class ExcelMapReader {
+public class ExcelDbImport {
 
-    public static List<List<String>> readExcelToList(String filePath) {
-        List<List<String>> dataList = new ArrayList<>();
-
+    public static void readAndInsert(String filePath) {
         EasyExcel.read(filePath, new AnalysisEventListener<Map<Integer, String>>() {
-            @Override
-            public void invoke(Map<Integer, String> data, AnalysisContext context) {
-                // 你可以选择是否打印出来看看结构
-                // System.out.println("原始数据：" + data);
 
-                List<String> row = new ArrayList<>();
-                for (int i = 0; i < data.size(); i++) {
-                    row.add(data.getOrDefault(i, ""));
+            private List<String> headers = new ArrayList<>();
+            private List<Map<String, String>> buffer = new ArrayList<>();
+            private final int BATCH_SIZE = 1000;
+
+            private boolean isHeaderParsed = false;
+
+            @Override
+            public void invoke(Map<Integer, String> rowData, AnalysisContext context) {
+                if (!isHeaderParsed) {
+                    // 解析表头
+                    for (int i = 0; i < rowData.size(); i++) {
+                        headers.add(rowData.getOrDefault(i, ""));
+                    }
+                    isHeaderParsed = true;
+                    return;
                 }
-                dataList.add(row);
+
+                // 解析数据行
+                Map<String, String> record = new LinkedHashMap<>();
+                for (int i = 0; i < headers.size(); i++) {
+                    String key = headers.get(i);
+                    String value = rowData.getOrDefault(i, "");
+                    record.put(key, value);
+                }
+                buffer.add(record);
+
+                // 分批插入数据库
+                if (buffer.size() >= BATCH_SIZE) {
+                    insertToDatabase(buffer);
+                    buffer.clear();
+                }
             }
 
             @Override
             public void doAfterAllAnalysed(AnalysisContext context) {
-                // 全部读取完成
+                if (!buffer.isEmpty()) {
+                    insertToDatabase(buffer);
+                }
+                System.out.println("数据全部处理完成");
             }
-        })
-        .sheet()
-        .headRowNumber(0) // 如果你希望跳过表头，改为 1
-        .doRead();
 
-        return dataList;
+        }).headRowNumber(0).sheet(0).doRead();
+    }
+
+    private static void insertToDatabase(List<Map<String, String>> rows) {
+        // 这里你可以执行批量插入数据库操作
+        // 例如使用 MyBatis、JDBC、JPA 等
+        System.out.println("插入数据条数：" + rows.size());
+        // 示例：打印第一条数据字段
+        if (!rows.isEmpty()) {
+            System.out.println("字段：" + rows.get(0).keySet());
+        }
     }
 
     public static void main(String[] args) {
-        String filePath = "test.xlsx";
-        List<List<String>> rows = readExcelToList(filePath);
-        System.out.println("总行数：" + rows.size());
-        for (List<String> row : rows) {
-            System.out.println(row);
-        }
+        String filePath = "large.xlsx";
+        readAndInsert(filePath);
     }
 }
