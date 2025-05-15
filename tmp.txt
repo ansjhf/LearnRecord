@@ -10,21 +10,28 @@ public class ExcelReader {
     public static List<List<String>> readExcelToList(String filePath) {
         List<List<String>> dataList = new ArrayList<>();
 
-        EasyExcel.read(filePath, new AnalysisEventListener<List<Object>>() {
+        EasyExcel.read(filePath, new AnalysisEventListener<Object>() {
             @Override
-            public void invoke(List<Object> rowData, AnalysisContext context) {
-                List<String> row = new ArrayList<>();
-                for (Object cell : rowData) {
-                    row.add(cell == null ? "" : cell.toString());
+            public void invoke(Object data, AnalysisContext context) {
+                // data 实际上是 List<Object>
+                if (data instanceof List) {
+                    List<?> row = (List<?>) data;
+                    List<String> stringRow = new ArrayList<>();
+                    for (Object cell : row) {
+                        stringRow.add(cell == null ? "" : cell.toString());
+                    }
+                    dataList.add(stringRow);
                 }
-                dataList.add(row);
             }
 
             @Override
             public void doAfterAllAnalysed(AnalysisContext context) {
-                // 读取完毕
+                // 读取完成
             }
-        }).sheet().doRead();
+        }).headRowNumber(0) // 不使用表头
+          .excelType(com.alibaba.excel.support.ExcelTypeEnum.XLSX) // 可选：显式指定文件类型
+          .sheet()
+          .doRead();
 
         return dataList;
     }
