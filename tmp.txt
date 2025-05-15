@@ -1,21 +1,57 @@
-public class ExcelRowChecker {
-    public static boolean isFirstRow(String cell) {
-        if (cell == null || "1".equals(cell) || cell.matches("^[A-Z]+1$")) {
-            return true;
-        }
-        return false;
+/**
+ * @description: 重写startElement() endElement() characters() 用于把Excel数据封装到 LinkedHashMap<String, String> 中
+ * @date: 2021/12/16 15:10
+ */
+public class SheetHandler extends DefaultHandler {
+    private SharedStringsTable sst;
+    private String lastContents;
+    private boolean nextIsString;
+    private String cellPosition;
+    private LinkedHashMap<String, String> rowContents = new LinkedHashMap<String, String>();
+
+    public LinkedHashMap<String, String> getRowContents() {
+        return rowContents;
     }
 
-    public static void main(String[] args) {
-        System.out.println(isFirstRow(null));   // true
-        System.out.println(isFirstRow("1"));    // true
-        System.out.println(isFirstRow("A1"));   // true
-        System.out.println(isFirstRow("B1"));   // true
-        System.out.println(isFirstRow("Z1"));   // true
-        System.out.println(isFirstRow("AA1"));  // true
-        System.out.println(isFirstRow("A2"));   // false
-        System.out.println(isFirstRow("B10"));  // false
-        System.out.println(isFirstRow("1A"));   // false
-        System.out.println(isFirstRow("AB"));   // false
+    public void setRowContents(LinkedHashMap<String, String> rowContents) {
+        this.rowContents = rowContents;
+    }
+
+    public SheetHandler(SharedStringsTable sst) {
+        this.sst = sst;
+    }
+
+    public void startElement(String uri, String localName, String name, Attributes attributes) throws SAXException {
+        if (name.equals("c")) {
+            cellPosition = attributes.getValue("r");
+            String cellType = attributes.getValue("t");
+            if (cellType != null && cellType.equals("s")) {
+                nextIsString = true;
+            } else {
+                nextIsString = false;
+            }
+        }
+        // 清楚缓存内容
+        lastContents = "";
+    }
+
+    public void endElement(String uri, String localName, String name)
+            throws SAXException {
+        if (nextIsString) {
+            int idx = Integer.parseInt(lastContents);
+            lastContents = new XSSFRichTextString(sst.getEntryAt(idx)).toString();
+            nextIsString = false;
+        }
+        if (name.equals("v")) {
+            // 数据读取结束后，将单元格坐标,内容存入map中
+            if (!(cellPosition.length() == 2) || (cellPosition.length() == 2 && !"1".equals(cellPosition.substring(1)))) { //不保存第一行数据
+                rowContents.put(cellPosition, lastContents);
+            }
+        }
+    }
+
+    public void characters(char[] ch, int start, int length) throws SAXException {
+        lastContents += new String(ch, start, length);
     }
 }
+
