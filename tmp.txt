@@ -1,65 +1,78 @@
-import com.alibaba.excel.EasyExcel;
-import com.alibaba.excel.context.AnalysisContext;
-import com.alibaba.excel.event.AnalysisEventListener;
+package com.example.logging;
 
-import java.util.*;
-import java.util.function.Consumer;
+import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.core.*;
+import org.apache.logging.log4j.core.config.plugins.*;
+import org.apache.logging.log4j.core.layout.PatternLayout;
+import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.LogEvent;
 
-public class ExcelBatchReader {
+import java.io.Serializable;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
-    public static void readExcelByBatch(String filePath, int batchSize,
-                                        Consumer<List<String>> onHeader,
-                                        Consumer<List<List<String>>> onBatch) {
-        EasyExcel.read(filePath, new AnalysisEventListener<Map<Integer, String>>() {
+@Plugin(name = "LevelBasedLimitAppender", category = Core.CATEGORY_NAME, elementType = Appender.ELEMENT_TYPE)
+public class LevelBasedLimitAppender extends AbstractAppender {
 
-            private List<String> header = new ArrayList<>();
-            private boolean isHeaderParsed = false;
+    private final Map<Level, Integer> levelCountMap = new ConcurrentHashMap<>();
 
-            private List<List<String>> buffer = new ArrayList<>();
+    private final int errorLimit;
+    private final int otherLimit;
 
-            @Override
-            public void invoke(Map<Integer, String> data, AnalysisContext context) {
-                if (!isHeaderParsed) {
-                    // 读取第一行作为表头
-                    for (int i = 0; i < data.size(); i++) {
-                        header.add(data.getOrDefault(i, ""));
-                    }
-                    isHeaderParsed = true;
-                    onHeader.accept(header);
-                    return;
-                }
-
-                // 读取数据行
-                List<String> row = new ArrayList<>();
-                for (int i = 0; i < header.size(); i++) {
-                    row.add(data.getOrDefault(i, ""));
-                }
-                buffer.add(row);
-
-                if (buffer.size() >= batchSize) {
-                    onBatch.accept(new ArrayList<>(buffer));
-                    buffer.clear();
-                }
-            }
-
-            @Override
-            public void doAfterAllAnalysed(AnalysisContext context) {
-                if (!buffer.isEmpty()) {
-                    onBatch.accept(new ArrayList<>(buffer));
-                }
-            }
-
-        })
-        .headRowNumber(0)
-        .sheet()
-        .doRead();
+    protected LevelBasedLimitAppender(String name, Filter filter, Layout<? extends Serializable> layout,
+                                      boolean ignoreExceptions, int errorLimit, int otherLimit) {
+        super(name, filter, layout, ignoreExceptions);
+        this.errorLimit = errorLimit;
+        this.otherLimit = otherLimit;
     }
 
-    // 示例用法
-    public static void main(String[] args) {
-        readExcelByBatch("test.xlsx", 1000,
-            header -> System.out.println("字段名：" + header),
-            batch -> System.out.println("批次数据量：" + batch.size())
-        );
+    @PluginFactory
+    public static LevelBasedLimitAppender createAppender(
+            @PluginAttribute("name") String name,
+            @PluginAttribute(value = "errorLimit", defaultInt = 20) int errorLimit,
+            @PluginAttribute(value = "otherLimit", defaultInt = 5) int otherLimit,
+            @PluginElement("Layout") Layout<? extends Serializable> layout,
+            @PluginElement("Filter") final Filter filter) {
+
+        if (name == null) {
+            LOGGER.error("No name provided for LevelBasedLimitAppender");
+            return null;
+        }
+
+        if (layout == null) {
+            layout = PatternLayout.createDefaultLayout();
+        }
+
+        return new LevelBasedLimitAppender(name, filter, layout, true, errorLimit, otherLimit);
+    }
+
+    @Override
+    public void append(LogEvent event) {
+        Level level = event.getLevel();
+        int limit = (level == Level.ERROR) ? errorLimit : otherLimit;
+
+        levelCountMap.putIfAbsent(level, 0);
+        int currentCount = levelCountMap.get(level);
+
+        if (currentCount < limit) {
+            levelCountMap.put(level, currentCount + 1);
+            byte[] bytes = getLayout().toByteArray(event);
+            System.out.write(bytes, 0, bytes.length); // 输出到控制台
+        }
     }
 }
+
+<Configuration status="WARN" packages="com.example.logging">
+    <Appenders>
+        <LevelBasedLimitAppender name="LimitedConsole" errorLimit="20" otherLimit="5">
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
+        </LevelBasedLimitAppender>
+    </Appenders>
+
+    <Loggers>
+        <Root level="debug">
+            <AppenderRef ref="LimitedConsole"/>
+        </Root>
+    </Loggers>
+</Configuration>
+
