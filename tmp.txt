@@ -100,3 +100,47 @@ public class SheetHandler implements SheetContentsHandler {
     }
 }
 
+
+@Override
+public void cell(String cellReference, String formattedValue, XSSFComment comment) {
+    String value = formattedValue != null ? formattedValue : "";
+    System.out.println("读取单元格 " + cellReference + " -> " + value);
+    currentRow.add(value);
+}
+
+
+@Override
+public void endRow(int rowNum) {
+    System.out.println("完成行：" + rowNum + " 数据：" + currentRow);
+
+    if (rowNum == 0) {
+        headers.addAll(currentRow);
+        System.out.println("表头字段：" + headers);
+    } else {
+        buffer.add(new ArrayList<>(currentRow));
+        if (buffer.size() >= BATCH_SIZE) {
+            handleBatch(buffer);
+            buffer.clear();
+        }
+    }
+}
+
+try (InputStream sheetStream = sheets.next()) {
+    XMLReader parser = XMLReaderFactory.createXMLReader();
+
+    SheetHandler handler = new SheetHandler(); // 独立类
+    XSSFSheetXMLHandler sheetHandler = new XSSFSheetXMLHandler(styles, null, sst, handler, null, false);
+    parser.setContentHandler(sheetHandler);
+
+    try {
+        parser.parse(new InputSource(sheetStream));
+    } catch (Exception e) {
+        System.err.println("SAX解析过程中出错！");
+        e.printStackTrace(); // 请贴这里打印的异常行号
+    }
+}
+
+
+
+
+
