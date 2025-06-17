@@ -144,3 +144,63 @@ try (InputStream sheetStream = sheets.next()) {
 
 
 
+public class SheetHandler implements SheetContentsHandler {
+
+    private List<String> currentRow;
+    private final List<String> headers = new ArrayList<>();
+    private final List<List<String>> buffer = new ArrayList<>();
+    private static final int BATCH_SIZE = 1000;
+
+    @Override
+    public void startRow(int rowNum) {
+        currentRow = new ArrayList<>();
+        System.out.println("开始读取第 " + rowNum + " 行");
+    }
+
+    @Override
+    public void cell(String cellReference, String formattedValue, XSSFComment comment) {
+        try {
+            String value = formattedValue != null ? formattedValue : "";
+            currentRow.add(value);
+            System.out.println("读取单元格 " + cellReference + " -> " + value);
+        } catch (Exception e) {
+            System.err.println("读取单元格出错：" + cellReference);
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void endRow(int rowNum) {
+        try {
+            if (rowNum == 0) {
+                headers.addAll(currentRow);
+                System.out.println("表头字段：" + headers);
+            } else {
+                buffer.add(new ArrayList<>(currentRow));
+                System.out.println("结束读取第 " + rowNum + " 行，值：" + currentRow);
+                if (buffer.size() >= BATCH_SIZE) {
+                    handleBatch(buffer);
+                    buffer.clear();
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("处理第 " + rowNum + " 行出错：" + currentRow);
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void endSheet() {
+        if (!buffer.isEmpty()) {
+            handleBatch(buffer);
+        }
+    }
+
+    private void handleBatch(List<List<String>> batch) {
+        System.out.println("处理批次，行数：" + batch.size());
+        // 写数据库等逻辑
+    }
+}
+
+
+
