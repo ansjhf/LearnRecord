@@ -128,3 +128,30 @@ public class PoiSaxExcelReader {
     </dependency>
   </dependencies>
 </dependencyManagement>
+
+XMLReader parser = XMLReaderFactory.createXMLReader();
+SheetHandler handler = new SheetHandler(sst);
+ContentHandler sheetHandler = new XSSFSheetXMLHandler(styles, null, sst, handler, null, false);
+parser.setContentHandler(sheetHandler);
+
+System.out.println("开始解析 sheet...");
+System.out.println("sheetStream: " + (sheetStream != null));
+System.out.println("sst: " + (sst != null));
+System.out.println("styles: " + (styles != null));
+System.out.println("parser contentHandler: " + parser.getContentHandler());
+
+try (OPCPackage pkg = OPCPackage.open(filePath)) {
+    XSSFReader reader = new XSSFReader(pkg);
+    SharedStringsTable sst = (SharedStringsTable) reader.getSharedStringsTable();
+    StylesTable styles = reader.getStylesTable();
+
+    XMLReader parser = XMLReaderFactory.createXMLReader();
+    SheetHandler handler = new SheetHandler(sst);
+    InputStream sheetInputStream = reader.getSheetsData().next();
+
+    parser.setContentHandler(
+        new XSSFSheetXMLHandler(styles, null, sst, handler, null, false)
+    );
+    parser.parse(new InputSource(sheetInputStream));
+}
+
