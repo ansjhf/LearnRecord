@@ -98,3 +98,11 @@ public class ExcelSaxReader {
         }
     }
 }
+
+mvn dependency:tree -Dincludes=com.zaxxer
+
+find ./ -name '*.jar' | xargs -I {} unzip -l {} | grep SparseBitSet
+
+-javaagent
+-verbose:class
+
