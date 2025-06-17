@@ -1,52 +1,3 @@
-import org.apache.poi.openxml4j.opc.OPCPackage;
-import org.apache.poi.xssf.eventusermodel.XSSFReader;
-import org.apache.poi.xssf.model.SharedStringsTable;
-import org.apache.poi.xssf.model.StylesTable;
-import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler;
-import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
-import org.xml.sax.InputSource;
-import org.xml.sax.XMLReader;
-import org.xml.sax.helpers.XMLReaderFactory;
-
-import java.io.InputStream;
-import java.util.Iterator;
-
-public class ExcelReader {
-
-    public void process(String filePath) throws Exception {
-        try (OPCPackage pkg = OPCPackage.open(filePath)) {
-            XSSFReader reader = new XSSFReader(pkg);
-
-            // 获取 sharedStrings 和样式表
-            SharedStringsTable sst = new ReadOnlySharedStringsTable(pkg);
-            StylesTable styles = reader.getStylesTable();
-
-            // 只处理第一个 sheet
-            Iterator<InputStream> sheets = reader.getSheetsData();
-            if (!sheets.hasNext()) {
-                System.out.println("没有找到 Sheet");
-                return;
-            }
-
-            try (InputStream sheetStream = sheets.next()) {
-                XMLReader parser = XMLReaderFactory.createXMLReader();
-
-                SheetHandler handler = new SheetHandler(); // 独立类
-                XSSFSheetXMLHandler sheetHandler = new XSSFSheetXMLHandler(styles, null, sst, handler, null, false);
-                parser.setContentHandler(sheetHandler);
-
-                parser.parse(new InputSource(sheetStream));
-            }
-        }
-    }
-
-    public static void main(String[] args) throws Exception {
-        new ExcelReader().process("your-file.xlsx");
-    }
-}
-
-
-import org.apache.poi.xssf.usermodel.XSSFComment;
 import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler.SheetContentsHandler;
 
 import java.util.ArrayList;
@@ -59,17 +10,16 @@ public class SheetHandler implements SheetContentsHandler {
     private final List<List<String>> buffer = new ArrayList<>();
     private static final int BATCH_SIZE = 1000;
 
-    private int rowIndex = 0;
-
     @Override
     public void startRow(int rowNum) {
         currentRow = new ArrayList<>();
-        this.rowIndex = rowNum;
     }
 
     @Override
-    public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-        currentRow.add(formattedValue != null ? formattedValue : "");
+    public void cell(String cellReference, String formattedValue, org.apache.poi.xssf.usermodel.XSSFComment comment) {
+        // 强制使用纯文本（formattedValue 就是显示值）
+        String value = formattedValue != null ? formattedValue : "";
+        currentRow.add(value);
     }
 
     @Override
@@ -79,7 +29,6 @@ public class SheetHandler implements SheetContentsHandler {
             System.out.println("表头字段：" + headers);
         } else {
             buffer.add(new ArrayList<>(currentRow));
-
             if (buffer.size() >= BATCH_SIZE) {
                 handleBatch(buffer);
                 buffer.clear();
@@ -95,112 +44,57 @@ public class SheetHandler implements SheetContentsHandler {
     }
 
     private void handleBatch(List<List<String>> batch) {
-        System.out.println("处理数据批次，行数: " + batch.size());
-        // 你可以在这里调用写入数据库的逻辑
+        System.out.println("处理批次，行数：" + batch.size());
+        // 可以在这里处理写库逻辑
     }
 }
 
 
-@Override
-public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-    String value = formattedValue != null ? formattedValue : "";
-    System.out.println("读取单元格 " + cellReference + " -> " + value);
-    currentRow.add(value);
-}
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.model.StylesTable;
+import org.apache.poi.xssf.usermodel.XSSFRichTextString;
+import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler;
+import org.apache.poi.xssf.eventusermodel.XSSFReader.SheetIterator;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.xml.sax.InputSource;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.XMLReaderFactory;
 
+import java.io.InputStream;
 
-@Override
-public void endRow(int rowNum) {
-    System.out.println("完成行：" + rowNum + " 数据：" + currentRow);
+public class ExcelSaxReader {
 
-    if (rowNum == 0) {
-        headers.addAll(currentRow);
-        System.out.println("表头字段：" + headers);
-    } else {
-        buffer.add(new ArrayList<>(currentRow));
-        if (buffer.size() >= BATCH_SIZE) {
-            handleBatch(buffer);
-            buffer.clear();
-        }
-    }
-}
+    public void readExcel(String filePath) throws Exception {
+        try (OPCPackage pkg = OPCPackage.open(filePath)) {
+            XSSFReader reader = new XSSFReader(pkg);
+            StylesTable styles = reader.getStylesTable(); // 可以传 null
+            ReadOnlySharedStringsTable sst = new ReadOnlySharedStringsTable(pkg);
 
-try (InputStream sheetStream = sheets.next()) {
-    XMLReader parser = XMLReaderFactory.createXMLReader();
+            SheetHandler handler = new SheetHandler();
+            DataFormatter formatter = new DataFormatter(); // 默认构造，即纯字符串
 
-    SheetHandler handler = new SheetHandler(); // 独立类
-    XSSFSheetXMLHandler sheetHandler = new XSSFSheetXMLHandler(styles, null, sst, handler, null, false);
-    parser.setContentHandler(sheetHandler);
+            XMLReader parser = XMLReaderFactory.createXMLReader();
 
-    try {
-        parser.parse(new InputSource(sheetStream));
-    } catch (Exception e) {
-        System.err.println("SAX解析过程中出错！");
-        e.printStackTrace(); // 请贴这里打印的异常行号
-    }
-}
+            XSSFSheetXMLHandler sheetHandler = new XSSFSheetXMLHandler(
+                    styles, // 可以是 null
+                    null,   // 无评论
+                    sst,
+                    handler,
+                    formatter,
+                    true     // ✅ 保持为 true，启用格式化（以获取 Excel 中显示的值）
+            );
 
+            parser.setContentHandler(sheetHandler);
 
-
-
-
-public class SheetHandler implements SheetContentsHandler {
-
-    private List<String> currentRow;
-    private final List<String> headers = new ArrayList<>();
-    private final List<List<String>> buffer = new ArrayList<>();
-    private static final int BATCH_SIZE = 1000;
-
-    @Override
-    public void startRow(int rowNum) {
-        currentRow = new ArrayList<>();
-        System.out.println("开始读取第 " + rowNum + " 行");
-    }
-
-    @Override
-    public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-        try {
-            String value = formattedValue != null ? formattedValue : "";
-            currentRow.add(value);
-            System.out.println("读取单元格 " + cellReference + " -> " + value);
-        } catch (Exception e) {
-            System.err.println("读取单元格出错：" + cellReference);
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    public void endRow(int rowNum) {
-        try {
-            if (rowNum == 0) {
-                headers.addAll(currentRow);
-                System.out.println("表头字段：" + headers);
-            } else {
-                buffer.add(new ArrayList<>(currentRow));
-                System.out.println("结束读取第 " + rowNum + " 行，值：" + currentRow);
-                if (buffer.size() >= BATCH_SIZE) {
-                    handleBatch(buffer);
-                    buffer.clear();
+            // 只读取第一个 sheet
+            SheetIterator sheets = (SheetIterator) reader.getSheetsData();
+            if (sheets.hasNext()) {
+                try (InputStream sheetStream = sheets.next()) {
+                    parser.parse(new InputSource(sheetStream));
                 }
             }
-        } catch (Exception e) {
-            System.err.println("处理第 " + rowNum + " 行出错：" + currentRow);
-            e.printStackTrace();
         }
-    }
-
-    @Override
-    public void endSheet() {
-        if (!buffer.isEmpty()) {
-            handleBatch(buffer);
-        }
-    }
-
-    private void handleBatch(List<List<String>> batch) {
-        System.out.println("处理批次，行数：" + batch.size());
-        // 写数据库等逻辑
     }
 }
-
-
-
