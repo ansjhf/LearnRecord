@@ -1,184 +1,85 @@
 import org.apache.poi.openxml4j.opc.OPCPackage;
-import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
-import org.apache.poi.ss.util.CellReference;
-import org.apache.poi.xssf.eventusermodel.*;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.model.SharedStringsTable;
 import org.apache.poi.xssf.model.StylesTable;
-import org.apache.poi.xssf.usermodel.XSSFComment;
-import org.xml.sax.*;
-import org.xml.sax.helpers.DefaultHandler;
+import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler;
+import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
+import org.xml.sax.InputSource;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.XMLReaderFactory;
 
-import javax.xml.parsers.ParserConfigurationException;
 import java.io.InputStream;
-import java.util.*;
+import java.util.Iterator;
 
-public class PoiSaxExcelReader {
+public class ExcelReader {
 
-    private static final int BATCH_SIZE = 5000;
-
-    public static void main(String[] args) throws Exception {
-        String filePath = "your_file.xlsx";
-        readExcelWithSax(filePath);
-    }
-
-    public static void readExcelWithSax(String filePath) throws Exception {
+    public void process(String filePath) throws Exception {
         try (OPCPackage pkg = OPCPackage.open(filePath)) {
             XSSFReader reader = new XSSFReader(pkg);
-            SharedStringsTable sst = reader.getSharedStringsTable();
+
+            // 获取 sharedStrings 和样式表
+            SharedStringsTable sst = new ReadOnlySharedStringsTable(pkg);
             StylesTable styles = reader.getStylesTable();
 
-            XMLReader parser = XMLReaderFactory.createXMLReader();
-            SheetHandler handler = new SheetHandler(sst);
-            parser.setContentHandler(new XSSFSheetXMLHandler(styles, null, sst, handler, null, false));
+            // 只处理第一个 sheet
+            Iterator<InputStream> sheets = reader.getSheetsData();
+            if (!sheets.hasNext()) {
+                System.out.println("没有找到 Sheet");
+                return;
+            }
 
-            // 只读取第一个 Sheet
-            InputStream sheetStream = reader.getSheetsData().next();
-            InputSource sheetSource = new InputSource(sheetStream);
-            parser.parse(sheetSource);
+            try (InputStream sheetStream = sheets.next()) {
+                XMLReader parser = XMLReaderFactory.createXMLReader();
+
+                SheetHandler handler = new SheetHandler(); // 独立类
+                XSSFSheetXMLHandler sheetHandler = new XSSFSheetXMLHandler(styles, null, sst, handler, null, false);
+                parser.setContentHandler(sheetHandler);
+
+                parser.parse(new InputSource(sheetStream));
+            }
         }
     }
 
-    /**
-     * 处理 Sheet 的 SAX 事件逻辑
-     */
-    private static class SheetHandler extends DefaultHandler implements XSSFSheetXMLHandler.SheetContentsHandler {
-
-        private final List<String> currentRow = new ArrayList<>();
-        private final List<List<String>> buffer = new ArrayList<>();
-        private final SharedStringsTable sst;
-
-        private boolean isHeader = true;
-        private List<String> headers = new ArrayList<>();
-        private int currentCol = -1;
-        private int lastCol = -1;
-        private int batchCount = 0;
-
-        SheetHandler(SharedStringsTable sst) {
-            this.sst = sst;
-        }
-
-        @Override
-        public void startRow(int rowNum) {
-            currentRow.clear();
-            currentCol = -1;
-            lastCol = -1;
-        }
-
-        @Override
-        public void endRow(int rowNum) {
-            // 填补空列
-            for (int i = currentRow.size(); i < headers.size(); i++) {
-                currentRow.add("");
-            }
-
-            if (isHeader) {
-                headers = new ArrayList<>(currentRow);
-                System.out.println("表头字段：" + headers);
-                isHeader = false;
-            } else {
-                buffer.add(new ArrayList<>(currentRow));
-                if (buffer.size() >= BATCH_SIZE) {
-                    batchCount++;
-                    handleBatch(buffer, batchCount);
-                    buffer.clear();
-                }
-            }
-        }
-
-        @Override
-        public void cell(String cellRef, String formattedValue, XSSFComment comment) {
-            // 计算当前单元格所在列（如 A=0, B=1...）
-            int thisCol = (cellRef == null) ? currentCol + 1 : new CellReference(cellRef).getCol();
-
-            // 填补中间的空单元格
-            for (int i = lastCol + 1; i < thisCol; i++) {
-                currentRow.add("");
-            }
-
-            currentRow.add(formattedValue != null ? formattedValue.trim() : "");
-            lastCol = thisCol;
-        }
-
-        @Override
-        public void endSheet() {
-            if (!buffer.isEmpty()) {
-                batchCount++;
-                handleBatch(buffer, batchCount);
-            }
-            System.out.println("SAX 读取完成，总批次：" + batchCount);
-        }
-
-        private void handleBatch(List<List<String>> batch, int batchIndex) {
-            System.out.println("处理第 " + batchIndex + " 批，行数：" + batch.size());
-            // 示例打印
-            if (!batch.isEmpty()) {
-                System.out.println("示例数据：" + batch.get(0));
-            }
-            // TODO: 可在此调用数据库写入等逻辑
-        }
+    public static void main(String[] args) throws Exception {
+        new ExcelReader().process("your-file.xlsx");
     }
 }
 
-<dependencyManagement>
-  <dependencies>
-    <dependency>
-      <groupId>org.apache.poi</groupId>
-      <artifactId>poi-ooxml</artifactId>
-      <version>5.2.5</version>
-    </dependency>
-  </dependencies>
-</dependencyManagement>
 
-XMLReader parser = XMLReaderFactory.createXMLReader();
-SheetHandler handler = new SheetHandler(sst);
-ContentHandler sheetHandler = new XSSFSheetXMLHandler(styles, null, sst, handler, null, false);
-parser.setContentHandler(sheetHandler);
+import org.apache.poi.xssf.usermodel.XSSFComment;
+import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler.SheetContentsHandler;
 
-System.out.println("开始解析 sheet...");
-System.out.println("sheetStream: " + (sheetStream != null));
-System.out.println("sst: " + (sst != null));
-System.out.println("styles: " + (styles != null));
-System.out.println("parser contentHandler: " + parser.getContentHandler());
-
-try (OPCPackage pkg = OPCPackage.open(filePath)) {
-    XSSFReader reader = new XSSFReader(pkg);
-    SharedStringsTable sst = (SharedStringsTable) reader.getSharedStringsTable();
-    StylesTable styles = reader.getStylesTable();
-
-    XMLReader parser = XMLReaderFactory.createXMLReader();
-    SheetHandler handler = new SheetHandler(sst);
-    InputStream sheetInputStream = reader.getSheetsData().next();
-
-    parser.setContentHandler(
-        new XSSFSheetXMLHandler(styles, null, sst, handler, null, false)
-    );
-    parser.parse(new InputSource(sheetInputStream));
-}
-
-
+import java.util.ArrayList;
+import java.util.List;
 
 public class SheetHandler implements SheetContentsHandler {
+
     private List<String> currentRow;
     private final List<String> headers = new ArrayList<>();
     private final List<List<String>> buffer = new ArrayList<>();
-    private final int BATCH_SIZE = 1000;
+    private static final int BATCH_SIZE = 1000;
+
+    private int rowIndex = 0;
 
     @Override
     public void startRow(int rowNum) {
         currentRow = new ArrayList<>();
+        this.rowIndex = rowNum;
     }
 
     @Override
     public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-        currentRow.add(formattedValue);
+        currentRow.add(formattedValue != null ? formattedValue : "");
     }
 
     @Override
     public void endRow(int rowNum) {
         if (rowNum == 0) {
             headers.addAll(currentRow);
+            System.out.println("表头字段：" + headers);
         } else {
-            buffer.add(currentRow);
+            buffer.add(new ArrayList<>(currentRow));
+
             if (buffer.size() >= BATCH_SIZE) {
                 handleBatch(buffer);
                 buffer.clear();
@@ -186,15 +87,16 @@ public class SheetHandler implements SheetContentsHandler {
         }
     }
 
-    private void handleBatch(List<List<String>> batch) {
-        System.out.println("处理批次，行数: " + batch.size());
-    }
-
     @Override
     public void endSheet() {
         if (!buffer.isEmpty()) {
             handleBatch(buffer);
         }
+    }
+
+    private void handleBatch(List<List<String>> batch) {
+        System.out.println("处理数据批次，行数: " + batch.size());
+        // 你可以在这里调用写入数据库的逻辑
     }
 }
 
