@@ -1,78 +1,120 @@
-package com.example.logging;
+import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.openxml4j.exceptions.OpenXML4JException;
+import org.apache.poi.ss.util.CellReference;
+import org.apache.poi.xssf.eventusermodel.*;
+import org.apache.poi.xssf.model.SharedStringsTable;
+import org.apache.poi.xssf.model.StylesTable;
+import org.apache.poi.xssf.usermodel.XSSFComment;
+import org.xml.sax.*;
+import org.xml.sax.helpers.DefaultHandler;
 
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.core.*;
-import org.apache.logging.log4j.core.config.plugins.*;
-import org.apache.logging.log4j.core.layout.PatternLayout;
-import org.apache.logging.log4j.core.appender.AbstractAppender;
-import org.apache.logging.log4j.core.LogEvent;
+import javax.xml.parsers.ParserConfigurationException;
+import java.io.InputStream;
+import java.util.*;
 
-import java.io.Serializable;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+public class PoiSaxExcelReader {
 
-@Plugin(name = "LevelBasedLimitAppender", category = Core.CATEGORY_NAME, elementType = Appender.ELEMENT_TYPE)
-public class LevelBasedLimitAppender extends AbstractAppender {
+    private static final int BATCH_SIZE = 5000;
 
-    private final Map<Level, Integer> levelCountMap = new ConcurrentHashMap<>();
-
-    private final int errorLimit;
-    private final int otherLimit;
-
-    protected LevelBasedLimitAppender(String name, Filter filter, Layout<? extends Serializable> layout,
-                                      boolean ignoreExceptions, int errorLimit, int otherLimit) {
-        super(name, filter, layout, ignoreExceptions);
-        this.errorLimit = errorLimit;
-        this.otherLimit = otherLimit;
+    public static void main(String[] args) throws Exception {
+        String filePath = "your_file.xlsx";
+        readExcelWithSax(filePath);
     }
 
-    @PluginFactory
-    public static LevelBasedLimitAppender createAppender(
-            @PluginAttribute("name") String name,
-            @PluginAttribute(value = "errorLimit", defaultInt = 20) int errorLimit,
-            @PluginAttribute(value = "otherLimit", defaultInt = 5) int otherLimit,
-            @PluginElement("Layout") Layout<? extends Serializable> layout,
-            @PluginElement("Filter") final Filter filter) {
+    public static void readExcelWithSax(String filePath) throws Exception {
+        try (OPCPackage pkg = OPCPackage.open(filePath)) {
+            XSSFReader reader = new XSSFReader(pkg);
+            SharedStringsTable sst = reader.getSharedStringsTable();
+            StylesTable styles = reader.getStylesTable();
 
-        if (name == null) {
-            LOGGER.error("No name provided for LevelBasedLimitAppender");
-            return null;
+            XMLReader parser = XMLReaderFactory.createXMLReader();
+            SheetHandler handler = new SheetHandler(sst);
+            parser.setContentHandler(new XSSFSheetXMLHandler(styles, null, sst, handler, null, false));
+
+            // 只读取第一个 Sheet
+            InputStream sheetStream = reader.getSheetsData().next();
+            InputSource sheetSource = new InputSource(sheetStream);
+            parser.parse(sheetSource);
         }
-
-        if (layout == null) {
-            layout = PatternLayout.createDefaultLayout();
-        }
-
-        return new LevelBasedLimitAppender(name, filter, layout, true, errorLimit, otherLimit);
     }
 
-    @Override
-    public void append(LogEvent event) {
-        Level level = event.getLevel();
-        int limit = (level == Level.ERROR) ? errorLimit : otherLimit;
+    /**
+     * 处理 Sheet 的 SAX 事件逻辑
+     */
+    private static class SheetHandler extends DefaultHandler implements XSSFSheetXMLHandler.SheetContentsHandler {
 
-        levelCountMap.putIfAbsent(level, 0);
-        int currentCount = levelCountMap.get(level);
+        private final List<String> currentRow = new ArrayList<>();
+        private final List<List<String>> buffer = new ArrayList<>();
+        private final SharedStringsTable sst;
 
-        if (currentCount < limit) {
-            levelCountMap.put(level, currentCount + 1);
-            byte[] bytes = getLayout().toByteArray(event);
-            System.out.write(bytes, 0, bytes.length); // 输出到控制台
+        private boolean isHeader = true;
+        private List<String> headers = new ArrayList<>();
+        private int currentCol = -1;
+        private int lastCol = -1;
+        private int batchCount = 0;
+
+        SheetHandler(SharedStringsTable sst) {
+            this.sst = sst;
+        }
+
+        @Override
+        public void startRow(int rowNum) {
+            currentRow.clear();
+            currentCol = -1;
+            lastCol = -1;
+        }
+
+        @Override
+        public void endRow(int rowNum) {
+            // 填补空列
+            for (int i = currentRow.size(); i < headers.size(); i++) {
+                currentRow.add("");
+            }
+
+            if (isHeader) {
+                headers = new ArrayList<>(currentRow);
+                System.out.println("表头字段：" + headers);
+                isHeader = false;
+            } else {
+                buffer.add(new ArrayList<>(currentRow));
+                if (buffer.size() >= BATCH_SIZE) {
+                    batchCount++;
+                    handleBatch(buffer, batchCount);
+                    buffer.clear();
+                }
+            }
+        }
+
+        @Override
+        public void cell(String cellRef, String formattedValue, XSSFComment comment) {
+            // 计算当前单元格所在列（如 A=0, B=1...）
+            int thisCol = (cellRef == null) ? currentCol + 1 : new CellReference(cellRef).getCol();
+
+            // 填补中间的空单元格
+            for (int i = lastCol + 1; i < thisCol; i++) {
+                currentRow.add("");
+            }
+
+            currentRow.add(formattedValue != null ? formattedValue.trim() : "");
+            lastCol = thisCol;
+        }
+
+        @Override
+        public void endSheet() {
+            if (!buffer.isEmpty()) {
+                batchCount++;
+                handleBatch(buffer, batchCount);
+            }
+            System.out.println("SAX 读取完成，总批次：" + batchCount);
+        }
+
+        private void handleBatch(List<List<String>> batch, int batchIndex) {
+            System.out.println("处理第 " + batchIndex + " 批，行数：" + batch.size());
+            // 示例打印
+            if (!batch.isEmpty()) {
+                System.out.println("示例数据：" + batch.get(0));
+            }
+            // TODO: 可在此调用数据库写入等逻辑
         }
     }
 }
-
-<Configuration status="WARN" packages="com.example.logging">
-    <Appenders>
-        <LevelBasedLimitAppender name="LimitedConsole" errorLimit="20" otherLimit="5">
-            <PatternLayout pattern="%d{HH:mm:ss.SSS} [%t] %-5level %logger{36} - %msg%n"/>
-        </LevelBasedLimitAppender>
-    </Appenders>
-
-    <Loggers>
-        <Root level="debug">
-            <AppenderRef ref="LimitedConsole"/>
-        </Root>
-    </Loggers>
-</Configuration>
-
