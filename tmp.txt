@@ -155,3 +155,46 @@ try (OPCPackage pkg = OPCPackage.open(filePath)) {
     parser.parse(new InputSource(sheetInputStream));
 }
 
+
+
+public class SheetHandler implements SheetContentsHandler {
+    private List<String> currentRow;
+    private final List<String> headers = new ArrayList<>();
+    private final List<List<String>> buffer = new ArrayList<>();
+    private final int BATCH_SIZE = 1000;
+
+    @Override
+    public void startRow(int rowNum) {
+        currentRow = new ArrayList<>();
+    }
+
+    @Override
+    public void cell(String cellReference, String formattedValue, XSSFComment comment) {
+        currentRow.add(formattedValue);
+    }
+
+    @Override
+    public void endRow(int rowNum) {
+        if (rowNum == 0) {
+            headers.addAll(currentRow);
+        } else {
+            buffer.add(currentRow);
+            if (buffer.size() >= BATCH_SIZE) {
+                handleBatch(buffer);
+                buffer.clear();
+            }
+        }
+    }
+
+    private void handleBatch(List<List<String>> batch) {
+        System.out.println("处理批次，行数: " + batch.size());
+    }
+
+    @Override
+    public void endSheet() {
+        if (!buffer.isEmpty()) {
+            handleBatch(buffer);
+        }
+    }
+}
+
